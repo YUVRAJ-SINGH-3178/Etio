@@ -1,0 +1,56 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "etio"
+version = "0.1.0"
+description = "A GitHub Action that diagnoses CI failures from repository context."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Yuvraj Singh" }]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "black>=24.10,<26",
+    "pre-commit>=4,<5",
+    "pytest>=8,<9",
+    "ruff>=0.8,<1",
+]
+
+[project.scripts]
+etio = "etio.cli:run_action"
+
+[project.urls]
+Homepage = "https://github.com/YUVRAJ-SINGH-3178/Etio"
+Repository = "https://github.com/YUVRAJ-SINGH-3178/Etio"
+Issues = "https://github.com/YUVRAJ-SINGH-3178/Etio/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/etio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.black]
+line-length = 88
+target-version = ["py311"]
+
+[tool.coverage.run]
+source = ["etio"]

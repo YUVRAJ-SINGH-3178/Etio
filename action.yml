@@ -1,0 +1,65 @@
+name: Etio
+description: Diagnose failed GitHub Actions jobs using repository context and Groq.
+author: Yuvraj Singh
+branding:
+  icon: activity
+  color: red
+
+inputs:
+  github-token:
+    description: Token used to read workflow context and publish reports.
+    required: true
+  groq-api-key:
+    description: Groq API key used for diagnosis. Never included in reports or prompts.
+    required: true
+  workflow-file:
+    description: Workflow filename used by the later real-bisection phase.
+    required: false
+  config-path:
+    description: Path to optional Etio configuration.
+    required: false
+    default: .github/etio.yml
+  auto-pr:
+    description: Allow the later auto-PR phase. Human review is always required.
+    required: false
+    default: "false"
+  max-diff-lines:
+    description: Maximum number of diff lines eligible for LLM context.
+    required: false
+    default: "400"
+
+outputs:
+  status:
+    description: Diagnosis outcome.
+    value: ${{ steps.etio.outputs.status }}
+  breaking-commit:
+    description: Best identified breaking commit SHA.
+    value: ${{ steps.etio.outputs.breaking-commit }}
+  report-url:
+    description: URL of the GitHub report.
+    value: ${{ steps.etio.outputs.report-url }}
+  diagnosis:
+    description: Redacted diagnosis summary.
+    value: ${{ steps.etio.outputs.diagnosis }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+    - shell: bash
+      run: python -m pip install --disable-pip-version-check "$GITHUB_ACTION_PATH"
+    - id: etio
+      shell: bash
+      env:
+        INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
+        INPUT_GROQ_API_KEY: ${{ inputs.groq-api-key }}
+        INPUT_WORKFLOW_FILE: ${{ inputs.workflow-file }}
+        INPUT_CONFIG_PATH: ${{ inputs.config-path }}
+        INPUT_AUTO_PR: ${{ inputs.auto-pr }}
+        INPUT_MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}
+      run: etio
