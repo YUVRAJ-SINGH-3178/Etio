@@ -5,31 +5,47 @@ repository where it runs. It is designed to locate relevant failure context,
 compare the failure against recent commits, request a redacted diagnosis from
 Groq, and publish the result back to GitHub.
 
-Etio is currently in its scaffolding phase. The action validates its required
-inputs and exposes stable placeholder outputs, but it does not yet retrieve
-logs, call Groq, or post reports. Do not rely on it for CI diagnosis yet.
+Etio currently retrieves a completed failed job's GitHub Actions log and
+extracts an error-focused local context. It does not yet locate the breaking
+commit, call Groq, or post reports, so it is not yet a complete CI diagnosis
+tool.
 
 ## Intended use
 
-Add Etio in a diagnostic workflow that runs after a failure. The workflow must
-grant only the permissions Etio needs:
+Add Etio in a downstream diagnostic job, after the failed job has completed.
+It cannot reliably download the log of the job that is still running Etio.
+The job must grant the action read access to Actions logs:
 
 ```yaml
-permissions:
-  contents: read
-  checks: read
-  pull-requests: write
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
 
-steps:
-  - uses: YUVRAJ-SINGH-3178/Etio@v0
-    with:
-      github-token: ${{ secrets.GITHUB_TOKEN }}
-      groq-api-key: ${{ secrets.GROQ_API_KEY }}
+  diagnose:
+    if: ${{ failure() }}
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: YUVRAJ-SINGH-3178/Etio@v0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          groq-api-key: ${{ secrets.GROQ_API_KEY }}
 ```
 
 The `github-token` and `groq-api-key` inputs are required. Optional inputs are
 `workflow-file`, `config-path` (default `.github/etio.yml`), `auto-pr` (default
-`false`), and `max-diff-lines` (default `400`).
+`false`), `max-diff-lines` (default `400`), and `failed-job-id`. When a run has
+more than one failed job, set `failed-job-id` to the numeric job ID from the
+Actions API. Etio refuses to guess which log to diagnose.
+
+Etio uses `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT` to retrieve jobs from the
+specific workflow attempt. It follows GitHub's temporary log-download URL
+without forwarding the GitHub token, and does not write raw logs to disk.
 
 ## Development
 
@@ -52,9 +68,10 @@ pre-commit install
 ## Security
 
 Future diagnosis requests will redact likely tokens, passwords, API keys, and
-connection strings before logs or diffs leave the GitHub runner. Etio does not
-auto-merge pull requests. Its future auto-PR capability will be opt-in and
-require human review.
+connection strings before logs or diffs leave the GitHub runner. Raw logs are
+kept in memory only and are not printed or exported as action outputs. Etio
+does not auto-merge pull requests. Its future auto-PR capability will be
+opt-in and require human review.
 
 ## License
 

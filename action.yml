@@ -27,6 +27,9 @@ inputs:
     description: Maximum number of diff lines eligible for LLM context.
     required: false
     default: "400"
+  failed-job-id:
+    description: Numeric ID of the failed workflow job when a run has multiple failures.
+    required: false
 
 outputs:
   status:
@@ -62,4 +65,5 @@ runs:
         INPUT_CONFIG_PATH: ${{ inputs.config-path }}
         INPUT_AUTO_PR: ${{ inputs.auto-pr }}
         INPUT_MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}
+        INPUT_FAILED_JOB_ID: ${{ inputs.failed-job-id }}
       run: etio
