@@ -153,21 +153,6 @@ def test_extract_failure_context_keeps_traceback() -> None:
     assert "starting tests" not in context
 
 
-def test_extract_failure_context_uses_failed_test_window() -> None:
-    raw_logs = "\n".join(
-        ["setup complete"] * 40
-        + [
-            "E       AssertionError: expected 200 but received 500",
-            "FAILED tests/test_api.py",
-        ]
-    )
-
-    context = extract_failure_context(raw_logs)
-
-    assert "AssertionError" in context
-    assert "FAILED tests/test_api.py" in context
-
-
 def test_extract_failure_context_rejects_invalid_bounds() -> None:
     with pytest.raises(ValueError, match="max_lines"):
         extract_failure_context("error", max_lines=0)

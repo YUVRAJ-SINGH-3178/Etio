@@ -5,10 +5,10 @@ repository where it runs. It is designed to locate relevant failure context,
 compare the failure against recent commits, request a redacted diagnosis from
 Groq, and publish the result back to GitHub.
 
-Etio currently retrieves a completed failed job's GitHub Actions log and
-extracts an error-focused local context. It does not yet locate the breaking
-commit, call Groq, or post reports, so it is not yet a complete CI diagnosis
-tool.
+Etio currently retrieves a completed failed job's GitHub Actions log, extracts
+an error-focused local context, and compares the failing revision with the
+most recent successful ancestor of the same workflow. It does not yet call
+Groq or post reports, so it is not yet a complete CI diagnosis tool.
 
 ## Intended use
 
@@ -47,6 +47,11 @@ Etio uses `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT` to retrieve jobs from the
 specific workflow attempt. It follows GitHub's temporary log-download URL
 without forwarding the GitHub token, and does not write raw logs to disk.
 
+For the cheap comparison, Etio lists completed runs on the current branch for
+the configured `workflow-file` (or the current workflow when available). It
+uses Git ancestry to ensure that the selected successful run actually precedes
+the failing revision, then bounds the resulting diff to `max-diff-lines`.
+
 ## Development
 
 Etio requires Python 3.11 or later.
@@ -68,10 +73,10 @@ pre-commit install
 ## Security
 
 Future diagnosis requests will redact likely tokens, passwords, API keys, and
-connection strings before logs or diffs leave the GitHub runner. Raw logs are
-kept in memory only and are not printed or exported as action outputs. Etio
-does not auto-merge pull requests. Its future auto-PR capability will be
-opt-in and require human review.
+connection strings before logs or diffs leave the GitHub runner. Raw logs and
+diffs are kept in memory only and are not printed or exported as action
+outputs. Etio does not auto-merge pull requests. Its future auto-PR capability
+will be opt-in and require human review.
 
 ## License
 

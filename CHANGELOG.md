@@ -10,3 +10,5 @@ All notable changes to Etio are documented here.
 - Local pytest, Ruff, Black, pre-commit, and GitHub Actions CI configuration.
 - Actions log retrieval from an exact workflow attempt and local
   failure-context extraction without persisting raw logs.
+- Last-successful workflow-run lookup and bounded local diff generation for
+  cheap bisection.
