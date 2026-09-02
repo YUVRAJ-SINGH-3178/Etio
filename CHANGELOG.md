@@ -14,3 +14,4 @@ All notable changes to Etio are documented here.
   cheap bisection.
 - Environment-then-config YAML lookup, secret redaction, and validated
   structured Groq diagnosis.
+- Idempotent, redacted pull-request and explicit commit diagnosis comments.

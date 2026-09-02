@@ -8,8 +8,8 @@ Groq, and publish the result back to GitHub.
 Etio currently retrieves a completed failed job's GitHub Actions log, extracts
 an error-focused local context, and compares the failing revision with the
 most recent successful ancestor of the same workflow. It sends only redacted
-failure and diff context to Groq for a structured diagnosis. It does not yet
-post reports, so it is not yet a complete CI diagnosis tool.
+failure and diff context to Groq for a structured diagnosis, then posts an
+idempotent comment to the associated pull request when one is available.
 
 ## Intended use
 
@@ -31,6 +31,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      pull-requests: write
     steps:
       - uses: YUVRAJ-SINGH-3178/Etio@v0
         with:
@@ -68,6 +69,20 @@ workflow-file: ci.yml
 The default model is `openai/gpt-oss-20b`. Use a Groq model that supports JSON
 Schema structured outputs if you override it. Etio requests a strict schema and
 rejects malformed or unexpected model responses rather than guessing.
+
+## Reporting
+
+`report-mode` defaults to `auto`: Etio posts a pull-request comment only when
+the event payload identifies exactly one pull request for the same repository.
+Set `pr-number` when reporting from another event type, or set
+`report-mode: pull-request` to require a PR target. Use `report-mode: none` to
+produce a diagnosis without posting it.
+
+Commit comments are an explicit `report-mode: commit` opt-in and require
+`contents: write`, which is broader than the standard PR-reporting scope. Etio
+does not infer a commit report from a branch or workflow run. It updates only a
+comment created by the same GitHub token and carrying an immutable
+target-specific Etio marker.
 
 ## Development
 

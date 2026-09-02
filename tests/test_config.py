@@ -14,6 +14,7 @@ def test_load_config_uses_environment_before_repository_settings(
         "groq-model: file-model\n"
         "diagnosis-timeout-seconds: 10\n"
         "workflow-file: ci.yml\n"
+        "report-mode: commit\n"
         "auto-pr: true\n",
         encoding="utf-8",
     )
@@ -23,6 +24,7 @@ def test_load_config_uses_environment_before_repository_settings(
         {
             "ETIO_GROQ_MODEL": "environment-model",
             "ETIO_DIAGNOSIS_TIMEOUT_SECONDS": "25",
+            "ETIO_REPORT_MODE": "pull-request",
         },
         tmp_path,
     )
@@ -30,6 +32,7 @@ def test_load_config_uses_environment_before_repository_settings(
     assert config.groq_model == "environment-model"
     assert config.diagnosis_timeout_seconds == 25
     assert config.workflow_file == "ci.yml"
+    assert config.report_mode == "pull-request"
     assert config.auto_pr is True
 
 
@@ -37,6 +40,7 @@ def test_load_config_uses_defaults_without_a_file(tmp_path: Path) -> None:
     config = load_config(".github/etio.yml", {}, tmp_path)
 
     assert config.groq_model == DEFAULT_GROQ_MODEL
+    assert config.report_mode == "auto"
     assert config.auto_pr is False
 
 

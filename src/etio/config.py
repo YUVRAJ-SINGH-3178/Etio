@@ -24,6 +24,7 @@ class EtioConfig:
     groq_model: str = DEFAULT_GROQ_MODEL
     diagnosis_timeout_seconds: float = DEFAULT_DIAGNOSIS_TIMEOUT_SECONDS
     workflow_file: str | None = None
+    report_mode: str = "auto"
     auto_pr: bool = False
 
 
@@ -57,6 +58,13 @@ def load_config(
             "INPUT_WORKFLOW_FILE",
             "ETIO_WORKFLOW_FILE",
             "workflow-file",
+        ),
+        report_mode=_report_mode_setting(
+            environment,
+            settings,
+            "INPUT_REPORT_MODE",
+            "ETIO_REPORT_MODE",
+            "report-mode",
         ),
         auto_pr=_boolean_setting(
             environment,
@@ -187,3 +195,25 @@ def _boolean_setting(
         if normalized in {"false", "0", "no"}:
             return False
     raise ConfigurationError(f"{config_name} must be true or false.")
+
+
+def _report_mode_setting(
+    environment: Mapping[str, str],
+    settings: Mapping[str, Any],
+    input_name: str,
+    environment_name: str,
+    config_name: str,
+) -> str:
+    value = _setting(
+        environment, settings, input_name, environment_name, config_name, "auto"
+    )
+    if not isinstance(value, str) or value not in {
+        "auto",
+        "pull-request",
+        "commit",
+        "none",
+    }:
+        raise ConfigurationError(
+            f"{config_name} must be auto, pull-request, commit, or none."
+        )
+    return value

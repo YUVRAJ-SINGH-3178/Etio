@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
+from pathlib import Path
 
 from etio.bisect import build_failure_diff, find_last_passing_commit
 from etio.config import load_config
@@ -15,6 +17,9 @@ from etio.logs import (
     select_failed_job,
 )
 from etio.redact import redact_sensitive_values
+from etio.report import GitHubReportError, ReportTarget, post_diagnosis
+
+MAX_OUTPUT_VALUE_CHARACTERS = 1_000
 
 
 def validate_action_inputs(environment: Mapping[str, str]) -> None:
@@ -48,7 +53,7 @@ def write_action_outputs(
     }
     with open(output_path, "a", encoding="utf-8") as output_file:
         for name, value in output_values.items():
-            output_file.write(f"{name}={value.replace(chr(10), ' ').strip()}\n")
+            output_file.write(f"{name}={_safe_output_value(value)}\n")
 
 
 def run_action() -> int:
@@ -111,9 +116,30 @@ def run_action() -> int:
         write_action_outputs(os.environ, "diagnosis-failed", diagnosis=message)
         print(f"Etio could not produce a diagnosis: {message}")
         return 0
+    target = _report_target(config.report_mode, os.environ, repository, head_sha)
+    if target is None:
+        write_action_outputs(
+            os.environ,
+            "diagnosed-unreported",
+            diagnosis=diagnosis.summary,
+        )
+        print("Etio produced a diagnosis but no report target was available.")
+        return 0
+    try:
+        report_url = post_diagnosis(repository, target, diagnosis, token, api_url)
+    except GitHubReportError as error:
+        message = redact_sensitive_values(str(error))
+        write_action_outputs(
+            os.environ,
+            "report-failed",
+            diagnosis=diagnosis.summary,
+        )
+        print(f"Etio produced a diagnosis but could not publish it: {message}")
+        return 0
     write_action_outputs(
         os.environ,
         "diagnosed",
+        report_url=report_url,
         diagnosis=diagnosis.summary,
     )
     print(
@@ -167,6 +193,79 @@ def _workflow_file(environment: Mapping[str, str]) -> str | None:
         return None
     workflow_file, _, _ = workflow_and_ref.partition("@")
     return workflow_file or None
+
+
+def _report_target(
+    report_mode: str,
+    environment: Mapping[str, str],
+    repository: str,
+    commit_sha: str,
+) -> ReportTarget | None:
+    if report_mode == "none":
+        return None
+    if report_mode == "commit":
+        return ReportTarget("commit", commit_sha)
+    requested_pr_number = _optional_integer(
+        environment.get("INPUT_PR_NUMBER"), "pr-number"
+    )
+    pr_number = requested_pr_number or _event_pull_request_number(
+        environment, repository
+    )
+    if pr_number is not None:
+        return ReportTarget("pull_request", pr_number)
+    if report_mode == "pull-request":
+        raise ValueError(
+            "Etio needs pr-number or a matching pull_request event to report to a PR."
+        )
+    return None
+
+
+def _event_pull_request_number(
+    environment: Mapping[str, str], repository: str
+) -> int | None:
+    event_path = environment.get("GITHUB_EVENT_PATH")
+    if not event_path:
+        return None
+    try:
+        payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    payload_repository = payload.get("repository")
+    if (
+        not isinstance(payload_repository, Mapping)
+        or payload_repository.get("full_name") != repository
+    ):
+        return None
+    direct_pull_request = payload.get("pull_request")
+    direct_number = _mapping_positive_integer(direct_pull_request, "number")
+    if direct_number is not None:
+        return direct_number
+    workflow_run = payload.get("workflow_run")
+    if not isinstance(workflow_run, Mapping):
+        return None
+    associated_pull_requests = workflow_run.get("pull_requests")
+    if not isinstance(associated_pull_requests, list):
+        return None
+    numbers = [
+        number
+        for pull_request in associated_pull_requests
+        if (number := _mapping_positive_integer(pull_request, "number")) is not None
+    ]
+    return numbers[0] if len(numbers) == 1 else None
+
+
+def _mapping_positive_integer(value: object, key: str) -> int | None:
+    if not isinstance(value, Mapping):
+        return None
+    candidate = value.get(key)
+    return candidate if isinstance(candidate, int) and candidate > 0 else None
+
+
+def _safe_output_value(value: str) -> str:
+    normalized = redact_sensitive_values(value).replace("\r", " ").replace("\n", " ")
+    return normalized.strip()[:MAX_OUTPUT_VALUE_CHARACTERS]
 
 
 if __name__ == "__main__":

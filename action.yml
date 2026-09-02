@@ -29,6 +29,13 @@ inputs:
     description: Allow the later auto-PR phase. Human review is always required.
     required: false
     default: "false"
+  report-mode:
+    description: Report target: auto, pull-request, commit, or none.
+    required: false
+    default: auto
+  pr-number:
+    description: Pull request number used when reporting outside a pull_request event.
+    required: false
   max-diff-lines:
     description: Maximum number of diff lines eligible for LLM context.
     required: false
@@ -72,6 +79,8 @@ runs:
         INPUT_WORKFLOW_FILE: ${{ inputs.workflow-file }}
         INPUT_CONFIG_PATH: ${{ inputs.config-path }}
         INPUT_AUTO_PR: ${{ inputs.auto-pr }}
+        INPUT_REPORT_MODE: ${{ inputs.report-mode }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number }}
         INPUT_MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}
         INPUT_FAILED_JOB_ID: ${{ inputs.failed-job-id }}
       run: etio
