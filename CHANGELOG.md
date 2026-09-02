@@ -12,3 +12,5 @@ All notable changes to Etio are documented here.
   failure-context extraction without persisting raw logs.
 - Last-successful workflow-run lookup and bounded local diff generation for
   cheap bisection.
+- Environment-then-config YAML lookup, secret redaction, and validated
+  structured Groq diagnosis.

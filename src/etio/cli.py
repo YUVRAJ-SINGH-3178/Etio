@@ -6,12 +6,15 @@ import os
 from collections.abc import Mapping
 
 from etio.bisect import build_failure_diff, find_last_passing_commit
+from etio.config import load_config
+from etio.diagnose import DiagnosisError, GroqAPIError, diagnose_failure
 from etio.logs import (
     extract_failure_context,
     fetch_job_logs,
     list_attempt_jobs,
     select_failed_job,
 )
+from etio.redact import redact_sensitive_values
 
 
 def validate_action_inputs(environment: Mapping[str, str]) -> None:
@@ -61,6 +64,7 @@ def run_action() -> int:
     )
     token = os.environ["INPUT_GITHUB_TOKEN"]
     api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com")
+    config = load_config(os.environ.get("INPUT_CONFIG_PATH"), os.environ)
     failed_job = select_failed_job(
         list_attempt_jobs(repository, run_id, attempt, token, api_url),
         _optional_integer(os.environ.get("INPUT_FAILED_JOB_ID"), "failed-job-id"),
@@ -81,7 +85,7 @@ def run_action() -> int:
         _branch_name(os.environ),
         head_sha,
         token,
-        _workflow_file(os.environ),
+        config.workflow_file or _workflow_file(os.environ),
         api_url,
     )
     if base_sha is None:
@@ -94,9 +98,26 @@ def run_action() -> int:
         head_sha,
         _positive_integer(os.environ.get("INPUT_MAX_DIFF_LINES"), "max-diff-lines"),
     )
-    write_action_outputs(os.environ, "context-and-diff-extracted")
+    try:
+        diagnosis = diagnose_failure(
+            failure_context,
+            diff,
+            os.environ["INPUT_GROQ_API_KEY"],
+            config.groq_model,
+            config.diagnosis_timeout_seconds,
+        )
+    except (DiagnosisError, GroqAPIError) as error:
+        message = redact_sensitive_values(str(error))
+        write_action_outputs(os.environ, "diagnosis-failed", diagnosis=message)
+        print(f"Etio could not produce a diagnosis: {message}")
+        return 0
+    write_action_outputs(
+        os.environ,
+        "diagnosed",
+        diagnosis=diagnosis.summary,
+    )
     print(
-        "Etio extracted "
+        "Etio diagnosed "
         f"{len(failure_context)} failure-context characters and "
         f"{len(diff)} diff characters."
     )

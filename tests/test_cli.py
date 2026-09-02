@@ -4,6 +4,7 @@ import pytest
 
 from etio.cli import run_action, validate_action_inputs
 from etio.logs import WorkflowJob
+from etio.models import Diagnosis
 
 
 def test_validate_action_inputs_requires_tokens() -> None:
@@ -11,7 +12,7 @@ def test_validate_action_inputs_requires_tokens() -> None:
         validate_action_inputs({})
 
 
-def test_run_action_collects_context_and_diff(
+def test_run_action_collects_context_and_diagnosis(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     output_path = tmp_path / "github-output"
@@ -31,13 +32,17 @@ def test_run_action_collects_context_and_diff(
     monkeypatch.setattr("etio.cli.fetch_job_logs", lambda *_: "error: broken")
     monkeypatch.setattr("etio.cli.find_last_passing_commit", lambda *_: "base-sha")
     monkeypatch.setattr("etio.cli.build_failure_diff", lambda *_: "diff")
+    monkeypatch.setattr(
+        "etio.cli.diagnose_failure",
+        lambda *_: Diagnosis("The setup is broken.", "Initialization changed.", None),
+    )
 
     assert run_action() == 0
     assert output_path.read_text(encoding="utf-8") == (
-        "status=context-and-diff-extracted\n"
+        "status=diagnosed\n"
         "breaking-commit=\n"
         "report-url=\n"
-        "diagnosis=\n"
+        "diagnosis=The setup is broken.\n"
     )
 
 

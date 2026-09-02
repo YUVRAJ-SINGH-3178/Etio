@@ -12,6 +12,12 @@ inputs:
   groq-api-key:
     description: Groq API key used for diagnosis. Never included in reports or prompts.
     required: true
+  groq-model:
+    description: Optional Groq model override. Otherwise Etio checks environment, then config.
+    required: false
+  diagnosis-timeout-seconds:
+    description: Optional timeout for the Groq diagnosis request.
+    required: false
   workflow-file:
     description: Workflow filename used by the later real-bisection phase.
     required: false
@@ -61,6 +67,8 @@ runs:
       env:
         INPUT_GITHUB_TOKEN: ${{ inputs.github-token }}
         INPUT_GROQ_API_KEY: ${{ inputs.groq-api-key }}
+        INPUT_GROQ_MODEL: ${{ inputs.groq-model }}
+        INPUT_DIAGNOSIS_TIMEOUT_SECONDS: ${{ inputs.diagnosis-timeout-seconds }}
         INPUT_WORKFLOW_FILE: ${{ inputs.workflow-file }}
         INPUT_CONFIG_PATH: ${{ inputs.config-path }}
         INPUT_AUTO_PR: ${{ inputs.auto-pr }}

@@ -7,8 +7,9 @@ Groq, and publish the result back to GitHub.
 
 Etio currently retrieves a completed failed job's GitHub Actions log, extracts
 an error-focused local context, and compares the failing revision with the
-most recent successful ancestor of the same workflow. It does not yet call
-Groq or post reports, so it is not yet a complete CI diagnosis tool.
+most recent successful ancestor of the same workflow. It sends only redacted
+failure and diff context to Groq for a structured diagnosis. It does not yet
+post reports, so it is not yet a complete CI diagnosis tool.
 
 ## Intended use
 
@@ -52,6 +53,22 @@ the configured `workflow-file` (or the current workflow when available). It
 uses Git ancestry to ensure that the selected successful run actually precedes
 the failing revision, then bounds the resulting diff to `max-diff-lines`.
 
+## Configuration
+
+Etio resolves settings in this order: an explicit action input, an `ETIO_*`
+environment variable, then `.github/etio.yml` (or the configured `config-path`).
+For example:
+
+```yaml
+groq-model: openai/gpt-oss-20b
+diagnosis-timeout-seconds: 60
+workflow-file: ci.yml
+```
+
+The default model is `openai/gpt-oss-20b`. Use a Groq model that supports JSON
+Schema structured outputs if you override it. Etio requests a strict schema and
+rejects malformed or unexpected model responses rather than guessing.
+
 ## Development
 
 Etio requires Python 3.11 or later.
@@ -72,11 +89,13 @@ pre-commit install
 
 ## Security
 
-Future diagnosis requests will redact likely tokens, passwords, API keys, and
-connection strings before logs or diffs leave the GitHub runner. Raw logs and
-diffs are kept in memory only and are not printed or exported as action
-outputs. Etio does not auto-merge pull requests. Its future auto-PR capability
-will be opt-in and require human review.
+Etio redacts likely tokens, passwords, API keys, URL credentials, connection
+strings, and private-key blocks before logs or diffs leave the GitHub runner.
+Raw logs and diffs are kept in memory only and are not printed or exported as
+action outputs. The Groq request asks for a JSON Schema-constrained diagnosis,
+and Etio validates and redacts the response again before exposing it. Etio does
+not auto-merge pull requests. Its future auto-PR capability will be opt-in and
+require human review.
 
 ## License
 
