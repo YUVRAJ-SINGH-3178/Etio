@@ -245,3 +245,15 @@ def test_build_diagnosis_comment_uses_a_safe_fence_and_neutralizes_mentions() ->
     assert "@\u200bmaintainer" in comment
     assert "secret" not in comment
     assert chr(96) * 5 in comment
+
+
+def test_build_diagnosis_comment_includes_only_a_valid_confirmed_commit() -> None:
+    comment = build_diagnosis_comment(
+        diagnosis(),
+        ReportTarget("pull_request", 4),
+        "a" * 40,
+    )
+
+    assert f"**Confirmed breaking commit:** `{'a' * 40}`" in comment
+    with pytest.raises(ValueError, match="breaking_commit"):
+        build_diagnosis_comment(diagnosis(), ReportTarget("pull_request", 4), "HEAD")

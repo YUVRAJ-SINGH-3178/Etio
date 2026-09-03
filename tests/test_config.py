@@ -44,6 +44,48 @@ def test_load_config_uses_defaults_without_a_file(tmp_path: Path) -> None:
     assert config.auto_pr is False
 
 
+def test_load_config_parses_opt_in_real_bisection_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / ".github" / "etio.yml"
+    config_path.parent.mkdir()
+    config_path.write_text(
+        "real-bisect: true\n"
+        "bisect-max-steps: 7\n"
+        "bisect-timeout-seconds: 120\n"
+        "bisect-poll-seconds: 5\n"
+        "bisect-workflow-inputs:\n"
+        "  test-command: pytest tests/test_symptoms.py\n"
+        "  retries: 2\n",
+        encoding="utf-8",
+    )
+
+    config = load_config(".github/etio.yml", {}, tmp_path)
+
+    assert config.real_bisect is True
+    assert config.bisect_max_steps == 7
+    assert config.bisect_timeout_seconds == 120
+    assert config.bisect_poll_seconds == 5
+    assert config.bisect_workflow_inputs == {
+        "test-command": "pytest tests/test_symptoms.py",
+        "retries": "2",
+    }
+
+
+def test_load_config_parses_bisection_input_json_from_the_action(
+    tmp_path: Path,
+) -> None:
+    config = load_config(
+        ".github/etio.yml",
+        {
+            "INPUT_BISECT_WORKFLOW_INPUTS": '{"test-command":"pytest -q"}',
+            "INPUT_REAL_BISECT": "true",
+        },
+        tmp_path,
+    )
+
+    assert config.real_bisect is True
+    assert config.bisect_workflow_inputs == {"test-command": "pytest -q"}
+
+
 def test_load_config_rejects_paths_outside_repository(tmp_path: Path) -> None:
     with pytest.raises(ConfigurationError, match="stay within"):
         load_config("../etio.yml", {}, tmp_path)
@@ -55,3 +97,12 @@ def test_load_config_rejects_invalid_values(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigurationError, match="true or false"):
         load_config("etio.yml", {}, tmp_path)
+
+
+def test_load_config_rejects_non_object_bisection_inputs(tmp_path: Path) -> None:
+    with pytest.raises(ConfigurationError, match="JSON object"):
+        load_config(
+            ".github/etio.yml",
+            {"INPUT_BISECT_WORKFLOW_INPUTS": "[]"},
+            tmp_path,
+        )

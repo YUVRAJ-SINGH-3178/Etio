@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +13,10 @@ import yaml
 
 DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b"
 DEFAULT_DIAGNOSIS_TIMEOUT_SECONDS = 60.0
+DEFAULT_BISECT_MAX_STEPS = 10
+DEFAULT_BISECT_TIMEOUT_SECONDS = 900.0
+DEFAULT_BISECT_POLL_SECONDS = 10.0
+MAX_WORKFLOW_DISPATCH_INPUTS = 25
 
 
 class ConfigurationError(ValueError):
@@ -26,6 +32,11 @@ class EtioConfig:
     workflow_file: str | None = None
     report_mode: str = "auto"
     auto_pr: bool = False
+    real_bisect: bool = False
+    bisect_max_steps: int = DEFAULT_BISECT_MAX_STEPS
+    bisect_timeout_seconds: float = DEFAULT_BISECT_TIMEOUT_SECONDS
+    bisect_poll_seconds: float = DEFAULT_BISECT_POLL_SECONDS
+    bisect_workflow_inputs: Mapping[str, str] = field(default_factory=dict)
 
 
 def load_config(
@@ -73,6 +84,45 @@ def load_config(
             "ETIO_AUTO_PR",
             "auto-pr",
             False,
+        ),
+        real_bisect=_boolean_setting(
+            environment,
+            settings,
+            "INPUT_REAL_BISECT",
+            "ETIO_REAL_BISECT",
+            "real-bisect",
+            False,
+        ),
+        bisect_max_steps=_positive_integer_setting(
+            environment,
+            settings,
+            "INPUT_BISECT_MAX_STEPS",
+            "ETIO_BISECT_MAX_STEPS",
+            "bisect-max-steps",
+            DEFAULT_BISECT_MAX_STEPS,
+        ),
+        bisect_timeout_seconds=_positive_float_setting(
+            environment,
+            settings,
+            "INPUT_BISECT_TIMEOUT_SECONDS",
+            "ETIO_BISECT_TIMEOUT_SECONDS",
+            "bisect-timeout-seconds",
+            DEFAULT_BISECT_TIMEOUT_SECONDS,
+        ),
+        bisect_poll_seconds=_positive_float_setting(
+            environment,
+            settings,
+            "INPUT_BISECT_POLL_SECONDS",
+            "ETIO_BISECT_POLL_SECONDS",
+            "bisect-poll-seconds",
+            DEFAULT_BISECT_POLL_SECONDS,
+        ),
+        bisect_workflow_inputs=_workflow_inputs_setting(
+            environment,
+            settings,
+            "INPUT_BISECT_WORKFLOW_INPUTS",
+            "ETIO_BISECT_WORKFLOW_INPUTS",
+            "bisect-workflow-inputs",
         ),
     )
 
@@ -175,6 +225,30 @@ def _positive_float_setting(
     return parsed
 
 
+def _positive_integer_setting(
+    environment: Mapping[str, str],
+    settings: Mapping[str, Any],
+    input_name: str,
+    environment_name: str,
+    config_name: str,
+    default: int,
+) -> int:
+    value = _setting(
+        environment, settings, input_name, environment_name, config_name, default
+    )
+    if isinstance(value, bool):
+        raise ConfigurationError(f"{config_name} must be a positive integer.")
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as error:
+        raise ConfigurationError(
+            f"{config_name} must be a positive integer."
+        ) from error
+    if parsed < 1 or str(parsed) != str(value).strip():
+        raise ConfigurationError(f"{config_name} must be a positive integer.")
+    return parsed
+
+
 def _boolean_setting(
     environment: Mapping[str, str],
     settings: Mapping[str, Any],
@@ -217,3 +291,50 @@ def _report_mode_setting(
             f"{config_name} must be auto, pull-request, commit, or none."
         )
     return value
+
+
+def _workflow_inputs_setting(
+    environment: Mapping[str, str],
+    settings: Mapping[str, Any],
+    input_name: str,
+    environment_name: str,
+    config_name: str,
+) -> Mapping[str, str]:
+    value = _setting(
+        environment, settings, input_name, environment_name, config_name, {}
+    )
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as error:
+            raise ConfigurationError(
+                f"{config_name} must be a JSON object when set as an input."
+            ) from error
+        if not isinstance(value, Mapping):
+            raise ConfigurationError(
+                f"{config_name} must be a JSON object when set as an input."
+            )
+    if not isinstance(value, Mapping):
+        raise ConfigurationError(f"{config_name} must be a mapping.")
+    if len(value) > MAX_WORKFLOW_DISPATCH_INPUTS:
+        raise ConfigurationError(
+            f"{config_name} cannot contain more than "
+            f"{MAX_WORKFLOW_DISPATCH_INPUTS} inputs."
+        )
+    workflow_inputs: dict[str, str] = {}
+    for key, item in value.items():
+        if not isinstance(key, str) or not re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_-]{0,63}", key
+        ):
+            raise ConfigurationError(
+                f"{config_name} has an invalid workflow input name."
+            )
+        if isinstance(item, (str, int, float, bool)):
+            workflow_inputs[key] = (
+                str(item).lower() if isinstance(item, bool) else str(item)
+            )
+        else:
+            raise ConfigurationError(
+                f"{config_name} values must be strings, numbers, or booleans."
+            )
+    return workflow_inputs

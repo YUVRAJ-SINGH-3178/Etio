@@ -2,6 +2,14 @@
 
 All notable changes to Etio are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Opt-in workflow-dispatch real bisection with bounded candidate runs,
+  first-parent confirmation, and exact-run polling.
+- Cleanup of Etio-owned temporary refs after each dispatched candidate.
+
 ## [0.1.0] - 2026-07-27
 
 ### Added

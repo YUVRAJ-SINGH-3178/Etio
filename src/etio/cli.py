@@ -16,6 +16,7 @@ from etio.logs import (
     list_attempt_jobs,
     select_failed_job,
 )
+from etio.real_bisect import RealBisectError, run_real_bisection
 from etio.redact import redact_sensitive_values
 from etio.report import GitHubReportError, ReportTarget, post_diagnosis
 
@@ -40,6 +41,7 @@ def write_action_outputs(
     breaking_commit: str = "",
     report_url: str = "",
     diagnosis: str = "",
+    bisection_status: str = "disabled",
 ) -> None:
     """Write bounded single-line action outputs without exposing raw context."""
     output_path = environment.get("GITHUB_OUTPUT")
@@ -50,6 +52,7 @@ def write_action_outputs(
         "breaking-commit": breaking_commit,
         "report-url": report_url,
         "diagnosis": diagnosis,
+        "bisection-status": bisection_status,
     }
     with open(output_path, "a", encoding="utf-8") as output_file:
         for name, value in output_values.items():
@@ -85,12 +88,13 @@ def run_action() -> int:
         fetch_job_logs(repository, failed_job.id, token, api_url)
     )
     head_sha = _required_environment_value(os.environ, "GITHUB_SHA")
+    workflow_file = config.workflow_file or _workflow_file(os.environ)
     base_sha = find_last_passing_commit(
         repository,
         _branch_name(os.environ),
         head_sha,
         token,
-        config.workflow_file or _workflow_file(os.environ),
+        workflow_file,
         api_url,
     )
     if base_sha is None:
@@ -102,6 +106,21 @@ def run_action() -> int:
         base_sha,
         head_sha,
         _positive_integer(os.environ.get("INPUT_MAX_DIFF_LINES"), "max-diff-lines"),
+    )
+    breaking_commit, bisection_status = _real_bisect_result(
+        config.real_bisect,
+        workflow_file,
+        repository,
+        base_sha,
+        head_sha,
+        token,
+        config.bisect_workflow_inputs,
+        run_id,
+        attempt,
+        config.bisect_max_steps,
+        config.bisect_timeout_seconds,
+        config.bisect_poll_seconds,
+        api_url,
     )
     try:
         diagnosis = diagnose_failure(
@@ -121,26 +140,39 @@ def run_action() -> int:
         write_action_outputs(
             os.environ,
             "diagnosed-unreported",
+            breaking_commit=breaking_commit,
             diagnosis=diagnosis.summary,
+            bisection_status=bisection_status,
         )
         print("Etio produced a diagnosis but no report target was available.")
         return 0
     try:
-        report_url = post_diagnosis(repository, target, diagnosis, token, api_url)
+        report_url = post_diagnosis(
+            repository,
+            target,
+            diagnosis,
+            token,
+            api_url,
+            breaking_commit=breaking_commit or None,
+        )
     except GitHubReportError as error:
         message = redact_sensitive_values(str(error))
         write_action_outputs(
             os.environ,
             "report-failed",
+            breaking_commit=breaking_commit,
             diagnosis=diagnosis.summary,
+            bisection_status=bisection_status,
         )
         print(f"Etio produced a diagnosis but could not publish it: {message}")
         return 0
     write_action_outputs(
         os.environ,
         "diagnosed",
+        breaking_commit=breaking_commit,
         report_url=report_url,
         diagnosis=diagnosis.summary,
+        bisection_status=bisection_status,
     )
     print(
         "Etio diagnosed "
@@ -148,6 +180,57 @@ def run_action() -> int:
         f"{len(diff)} diff characters."
     )
     return 0
+
+
+def _real_bisect_result(
+    enabled: bool,
+    workflow_file: str | None,
+    repository: str,
+    base_sha: str,
+    head_sha: str,
+    token: str,
+    workflow_inputs: Mapping[str, str],
+    run_id: int,
+    run_attempt: int,
+    max_steps: int,
+    timeout_seconds: float,
+    poll_seconds: float,
+    api_url: str,
+) -> tuple[str, str]:
+    if not enabled:
+        return "", "disabled"
+    if workflow_file is None:
+        print("Etio skipped real bisection because workflow-file is not configured.")
+        return "", "failed"
+    try:
+        result = run_real_bisection(
+            repository,
+            base_sha,
+            head_sha,
+            workflow_file,
+            token,
+            workflow_inputs,
+            run_id,
+            run_attempt,
+            max_steps,
+            timeout_seconds,
+            poll_seconds,
+            api_url,
+        )
+    except RealBisectError as error:
+        print(
+            "Etio could not complete real bisection: "
+            f"{redact_sensitive_values(str(error))}"
+        )
+        return "", "failed"
+    if not result.complete or result.breaking_commit is None:
+        reason = redact_sensitive_values(
+            result.reason or "no exact result was returned"
+        )
+        print(f"Etio stopped real bisection without an exact commit: {reason}")
+        return "", "incomplete"
+    print(f"Etio confirmed breaking commit {result.breaking_commit}.")
+    return result.breaking_commit, "confirmed"
 
 
 def _required_environment_value(environment: Mapping[str, str], name: str) -> str:

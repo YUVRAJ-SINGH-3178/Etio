@@ -56,6 +56,7 @@ def post_diagnosis(
     token: str,
     api_url: str = GITHUB_API_URL,
     opener: UrlOpener = urlopen,
+    breaking_commit: str | None = None,
 ) -> str:
     """Create or update Etio's own comment on a PR or commit."""
     safe_api_url = _validated_api_url(api_url)
@@ -69,7 +70,7 @@ def post_diagnosis(
         actor,
         _scope_marker(target),
     )
-    body = build_diagnosis_comment(diagnosis, target)
+    body = build_diagnosis_comment(diagnosis, target, breaking_commit)
     if existing_comment is None:
         response = _github_request(
             routes.create_url,
@@ -131,7 +132,9 @@ def post_commit_diagnosis_comment(
 
 
 def build_diagnosis_comment(
-    diagnosis: Diagnosis, target: ReportTarget | None = None
+    diagnosis: Diagnosis,
+    target: ReportTarget | None = None,
+    breaking_commit: str | None = None,
 ) -> str:
     """Render a diagnosis after redacting every externally visible field."""
     summary = _comment_text(diagnosis.summary, 3_000)
@@ -149,6 +152,10 @@ def build_diagnosis_comment(
         "**Root cause**",
         root_cause,
     ]
+    if breaking_commit is not None:
+        if not re.fullmatch(r"[A-Fa-f0-9]{7,64}", breaking_commit):
+            raise ValueError("breaking_commit must be a hexadecimal SHA.")
+        body.extend(["", f"**Confirmed breaking commit:** `{breaking_commit}`"])
     if diagnosis.suggested_patch:
         patch = _limited_text(
             redact_sensitive_values(diagnosis.suggested_patch), 40_000

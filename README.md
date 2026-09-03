@@ -10,6 +10,8 @@ an error-focused local context, and compares the failing revision with the
 most recent successful ancestor of the same workflow. It sends only redacted
 failure and diff context to Groq for a structured diagnosis, then posts an
 idempotent comment to the associated pull request when one is available.
+When explicitly enabled, it can also confirm the first failing commit by
+dispatching a repository-owned test workflow against temporary refs.
 
 ## Intended use
 
@@ -31,6 +33,7 @@ jobs:
     permissions:
       actions: read
       contents: read
+      checks: read
       pull-requests: write
     steps:
       - uses: YUVRAJ-SINGH-3178/Etio@v0
@@ -39,11 +42,15 @@ jobs:
           groq-api-key: ${{ secrets.GROQ_API_KEY }}
 ```
 
+Composite actions cannot set permissions for their caller, so keep this
+declaration on the consuming job rather than relying on repository defaults.
+
 The `github-token` and `groq-api-key` inputs are required. Optional inputs are
-`workflow-file`, `config-path` (default `.github/etio.yml`), `auto-pr` (default
-`false`), `max-diff-lines` (default `400`), and `failed-job-id`. When a run has
-more than one failed job, set `failed-job-id` to the numeric job ID from the
-Actions API. Etio refuses to guess which log to diagnose.
+`workflow-file`, `config-path` (default `.github/etio.yml`), `real-bisect`
+(default `false`), `auto-pr` (default `false`), `max-diff-lines` (default
+`400`), and `failed-job-id`. When a run has more than one failed job, set
+`failed-job-id` to the numeric job ID from the Actions API. Etio refuses to
+guess which log to diagnose.
 
 Etio uses `GITHUB_RUN_ID` and `GITHUB_RUN_ATTEMPT` to retrieve jobs from the
 specific workflow attempt. It follows GitHub's temporary log-download URL
@@ -69,6 +76,56 @@ workflow-file: ci.yml
 The default model is `openai/gpt-oss-20b`. Use a Groq model that supports JSON
 Schema structured outputs if you override it. Etio requests a strict schema and
 rejects malformed or unexpected model responses rather than guessing.
+
+## Real bisection
+
+Real bisection is deliberately opt-in. It is for a repository that already has
+a `workflow_dispatch` workflow which runs the particular failing test or test
+suite. Etio cannot safely infer a shell command from a log, so the repository
+owns that workflow and its declared, non-secret inputs.
+
+```
+real-bisect: true
+workflow-file: bisect.yml
+bisect-max-steps: 10
+bisect-timeout-seconds: 900
+bisect-poll-seconds: 10
+bisect-workflow-inputs:
+  suite: symptoms
+```
+
+The selected workflow must support `workflow_dispatch`, be present on the
+repository's default branch, and exist in every candidate commit. It must
+report success when the chosen test passes and failure when it fails. Do not
+point Etio at a workflow that invokes Etio again; use a test-only dispatch
+workflow to avoid recursive diagnostic runs. Treat workflow inputs as
+repository configuration, not a place for secrets.
+
+For each candidate, Etio creates a unique `etio/bisect/` branch pointing at
+that commit, dispatches the configured workflow, polls the specific dispatched
+run, and deletes the branch even if dispatching or polling fails. It first
+proves that the configured test passes at the known-good base and fails at
+HEAD, then binary-searches the first-parent commit chain. The
+`bisect-max-steps` budget includes those two boundary runs; when it is
+insufficient, Etio returns no breaking SHA rather than guessing.
+
+This opt-in mode needs broader permissions in the consuming diagnostic job:
+
+```
+permissions:
+  actions: write
+  contents: write
+  checks: read
+  pull-requests: write
+```
+
+`bisection-status` is `disabled`, `confirmed`, `incomplete`, or `failed`.
+Only a confirmed result is written to `breaking-commit` and included in the
+GitHub report. GitHub documents that workflow dispatch requires a branch or tag
+ref and Actions write permission, while creating temporary refs requires
+Contents write permission. [Workflow dispatch API](https://docs.github.com/en/rest/actions/workflows)
+and [Git references API](https://docs.github.com/en/rest/git/refs) describe
+those requirements.
 
 ## Reporting
 

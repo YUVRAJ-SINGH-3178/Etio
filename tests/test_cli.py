@@ -11,6 +11,7 @@ from etio.cli import (
 )
 from etio.logs import WorkflowJob
 from etio.models import Diagnosis
+from etio.real_bisect import RealBisectResult
 
 
 def test_validate_action_inputs_requires_tokens() -> None:
@@ -49,6 +50,7 @@ def test_run_action_collects_an_unreported_diagnosis(
         "breaking-commit=\n"
         "report-url=\n"
         "diagnosis=The setup is broken.\n"
+        "bisection-status=disabled\n"
     )
 
 
@@ -143,7 +145,7 @@ def test_run_action_reports_to_the_pull_request_in_a_matching_event(
     )
     monkeypatch.setattr(
         "etio.cli.post_diagnosis",
-        lambda *_: "https://github.test/octo/etio/pull/7#issuecomment-1",
+        lambda *_, **__: "https://github.test/octo/etio/pull/7#issuecomment-1",
     )
 
     assert run_action() == 0
@@ -152,6 +154,63 @@ def test_run_action_reports_to_the_pull_request_in_a_matching_event(
         "breaking-commit=\n"
         "report-url=https://github.test/octo/etio/pull/7#issuecomment-1\n"
         "diagnosis=The setup is broken.\n"
+        "bisection-status=disabled\n"
+    )
+
+
+def test_run_action_reports_a_confirmed_real_bisection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output_path = tmp_path / "github-output"
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        '{"repository":{"full_name":"octo/etio"},"pull_request":{"number":7}}',
+        encoding="utf-8",
+    )
+    breaking_commit = "a" * 40
+    monkeypatch.setenv("INPUT_GITHUB_TOKEN", "token")
+    monkeypatch.setenv("INPUT_GROQ_API_KEY", "key")
+    monkeypatch.setenv("INPUT_MAX_DIFF_LINES", "400")
+    monkeypatch.setenv("INPUT_REAL_BISECT", "true")
+    monkeypatch.setenv("INPUT_WORKFLOW_FILE", "bisect.yml")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "octo/etio")
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    monkeypatch.setenv("GITHUB_SHA", "b" * 40)
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+    monkeypatch.setattr(
+        "etio.cli.list_attempt_jobs",
+        lambda *_: [WorkflowJob(17, "test", "completed", "failure")],
+    )
+    monkeypatch.setattr("etio.cli.fetch_job_logs", lambda *_: "error: broken")
+    monkeypatch.setattr("etio.cli.find_last_passing_commit", lambda *_: "c" * 40)
+    monkeypatch.setattr("etio.cli.build_failure_diff", lambda *_: "diff")
+    monkeypatch.setattr(
+        "etio.cli.run_real_bisection",
+        lambda *_: RealBisectResult(breaking_commit, (breaking_commit,), True),
+    )
+    monkeypatch.setattr(
+        "etio.cli.diagnose_failure",
+        lambda *_: Diagnosis("The setup is broken.", "Initialization changed.", None),
+    )
+    report_arguments: dict[str, object] = {}
+
+    def post(*_: object, **kwargs: object) -> str:
+        report_arguments.update(kwargs)
+        return "https://github.test/octo/etio/pull/7#issuecomment-1"
+
+    monkeypatch.setattr("etio.cli.post_diagnosis", post)
+
+    assert run_action() == 0
+    assert report_arguments["breaking_commit"] == breaking_commit
+    assert output_path.read_text(encoding="utf-8") == (
+        "status=diagnosed\n"
+        f"breaking-commit={breaking_commit}\n"
+        "report-url=https://github.test/octo/etio/pull/7#issuecomment-1\n"
+        "diagnosis=The setup is broken.\n"
+        "bisection-status=confirmed\n"
     )
 
 
@@ -186,5 +245,5 @@ def test_write_action_outputs_prevents_newline_injection(
 
     contents = output_path.read_text(encoding="utf-8")
     assert "forged=value" in contents
-    assert contents.count("\n") == 4
+    assert contents.count("\n") == 5
     assert "ghp_" not in contents

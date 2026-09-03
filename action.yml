@@ -19,8 +19,28 @@ inputs:
     description: Optional timeout for the Groq diagnosis request.
     required: false
   workflow-file:
-    description: Workflow filename used by the later real-bisection phase.
+    description: workflow_dispatch workflow used for cheap and optional real bisection.
     required: false
+  real-bisect:
+    description: Opt in to bounded workflow_dispatch bisection on temporary refs.
+    required: false
+    default: "false"
+  bisect-workflow-inputs:
+    description: JSON object of non-secret inputs accepted by the bisection workflow.
+    required: false
+    default: "{}"
+  bisect-max-steps:
+    description: Maximum dispatched workflow runs used to confirm a breaking commit.
+    required: false
+    default: "10"
+  bisect-timeout-seconds:
+    description: Maximum wait for each dispatched bisection workflow run.
+    required: false
+    default: "900"
+  bisect-poll-seconds:
+    description: Delay between bisection workflow status checks.
+    required: false
+    default: "10"
   config-path:
     description: Path to optional Etio configuration.
     required: false
@@ -30,7 +50,7 @@ inputs:
     required: false
     default: "false"
   report-mode:
-    description: Report target: auto, pull-request, commit, or none.
+    description: "Report target: auto, pull-request, commit, or none."
     required: false
     default: auto
   pr-number:
@@ -57,6 +77,9 @@ outputs:
   diagnosis:
     description: Redacted diagnosis summary.
     value: ${{ steps.etio.outputs.diagnosis }}
+  bisection-status:
+    description: disabled, confirmed, incomplete, or failed.
+    value: ${{ steps.etio.outputs.bisection-status }}
 
 runs:
   using: composite
@@ -77,6 +100,11 @@ runs:
         INPUT_GROQ_MODEL: ${{ inputs.groq-model }}
         INPUT_DIAGNOSIS_TIMEOUT_SECONDS: ${{ inputs.diagnosis-timeout-seconds }}
         INPUT_WORKFLOW_FILE: ${{ inputs.workflow-file }}
+        INPUT_REAL_BISECT: ${{ inputs.real-bisect }}
+        INPUT_BISECT_WORKFLOW_INPUTS: ${{ inputs.bisect-workflow-inputs }}
+        INPUT_BISECT_MAX_STEPS: ${{ inputs.bisect-max-steps }}
+        INPUT_BISECT_TIMEOUT_SECONDS: ${{ inputs.bisect-timeout-seconds }}
+        INPUT_BISECT_POLL_SECONDS: ${{ inputs.bisect-poll-seconds }}
         INPUT_CONFIG_PATH: ${{ inputs.config-path }}
         INPUT_AUTO_PR: ${{ inputs.auto-pr }}
         INPUT_REPORT_MODE: ${{ inputs.report-mode }}
