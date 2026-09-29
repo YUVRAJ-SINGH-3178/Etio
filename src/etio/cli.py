@@ -7,6 +7,7 @@ import os
 from collections.abc import Mapping
 from pathlib import Path
 
+from etio.auto_pr import AutoPRError, open_auto_pr
 from etio.bisect import build_failure_diff, find_last_passing_commit
 from etio.config import load_config
 from etio.diagnose import DiagnosisError, GroqAPIError, diagnose_failure
@@ -16,6 +17,7 @@ from etio.logs import (
     list_attempt_jobs,
     select_failed_job,
 )
+from etio.models import Diagnosis
 from etio.real_bisect import RealBisectError, run_real_bisection
 from etio.redact import redact_sensitive_values
 from etio.report import GitHubReportError, ReportTarget, post_diagnosis
@@ -42,6 +44,8 @@ def write_action_outputs(
     report_url: str = "",
     diagnosis: str = "",
     bisection_status: str = "disabled",
+    auto_pr_url: str = "",
+    auto_pr_status: str = "disabled",
 ) -> None:
     """Write bounded single-line action outputs without exposing raw context."""
     output_path = environment.get("GITHUB_OUTPUT")
@@ -53,6 +57,8 @@ def write_action_outputs(
         "report-url": report_url,
         "diagnosis": diagnosis,
         "bisection-status": bisection_status,
+        "auto-pr-url": auto_pr_url,
+        "auto-pr-status": auto_pr_status,
     }
     with open(output_path, "a", encoding="utf-8") as output_file:
         for name, value in output_values.items():
@@ -132,9 +138,27 @@ def run_action() -> int:
         )
     except (DiagnosisError, GroqAPIError) as error:
         message = redact_sensitive_values(str(error))
-        write_action_outputs(os.environ, "diagnosis-failed", diagnosis=message)
+        write_action_outputs(
+            os.environ,
+            "diagnosis-failed",
+            breaking_commit=breaking_commit,
+            diagnosis=message,
+            bisection_status=bisection_status,
+            auto_pr_status="skipped" if config.auto_pr else "disabled",
+        )
         print(f"Etio could not produce a diagnosis: {message}")
         return 0
+    auto_pr_url, auto_pr_status = _auto_pr_result(
+        config.auto_pr,
+        diagnosis,
+        repository,
+        head_sha,
+        run_id,
+        attempt,
+        token,
+        api_url,
+        os.environ,
+    )
     target = _report_target(config.report_mode, os.environ, repository, head_sha)
     if target is None:
         write_action_outputs(
@@ -143,6 +167,8 @@ def run_action() -> int:
             breaking_commit=breaking_commit,
             diagnosis=diagnosis.summary,
             bisection_status=bisection_status,
+            auto_pr_url=auto_pr_url,
+            auto_pr_status=auto_pr_status,
         )
         print("Etio produced a diagnosis but no report target was available.")
         return 0
@@ -163,6 +189,8 @@ def run_action() -> int:
             breaking_commit=breaking_commit,
             diagnosis=diagnosis.summary,
             bisection_status=bisection_status,
+            auto_pr_url=auto_pr_url,
+            auto_pr_status=auto_pr_status,
         )
         print(f"Etio produced a diagnosis but could not publish it: {message}")
         return 0
@@ -173,6 +201,8 @@ def run_action() -> int:
         report_url=report_url,
         diagnosis=diagnosis.summary,
         bisection_status=bisection_status,
+        auto_pr_url=auto_pr_url,
+        auto_pr_status=auto_pr_status,
     )
     print(
         "Etio diagnosed "
@@ -180,6 +210,107 @@ def run_action() -> int:
         f"{len(diff)} diff characters."
     )
     return 0
+
+
+def _auto_pr_result(
+    enabled: bool,
+    diagnosis: Diagnosis,
+    repository: str,
+    head_sha: str,
+    run_id: int,
+    run_attempt: int,
+    token: str,
+    api_url: str,
+    environment: Mapping[str, str],
+) -> tuple[str, str]:
+    if not enabled:
+        return "", "disabled"
+    if diagnosis.confidence != "high" or not diagnosis.suggested_patch:
+        print("Etio skipped auto-PR because no high-confidence patch was available.")
+        return "", "skipped"
+    auto_pr_target = _auto_pr_target(environment, repository, head_sha)
+    if auto_pr_target is None:
+        print("Etio could not identify a safe base branch for the draft PR.")
+        return "", "failed"
+    base_branch, source_sha = auto_pr_target
+    try:
+        result = open_auto_pr(
+            repository,
+            base_branch,
+            source_sha,
+            run_id,
+            run_attempt,
+            diagnosis,
+            token,
+            Path.cwd(),
+            environment.get("GITHUB_SERVER_URL", "https://github.com"),
+            api_url,
+        )
+    except AutoPRError as error:
+        message = redact_sensitive_values(str(error))
+        print(f"Etio could not open the draft PR: {message}")
+        return "", "failed"
+    print(f"Etio opened a draft PR: {result.url}")
+    return result.url, "created" if result.created else "existing"
+
+
+def _auto_pr_target(
+    environment: Mapping[str, str], repository: str, head_sha: str
+) -> tuple[str, str] | None:
+    event_path = environment.get("GITHUB_EVENT_PATH")
+    payload: Mapping[str, object] = {}
+    if event_path:
+        try:
+            event_payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            event_payload = None
+        if isinstance(event_payload, Mapping):
+            payload = event_payload
+
+    payload_repository = payload.get("repository")
+    if isinstance(payload_repository, Mapping):
+        full_name = payload_repository.get("full_name")
+        if full_name is not None and full_name != repository:
+            return None
+
+    pull_request = payload.get("pull_request")
+    if isinstance(pull_request, Mapping):
+        return _same_repository_pull_request_target(pull_request, repository)
+
+    workflow_run = payload.get("workflow_run")
+    if isinstance(workflow_run, Mapping):
+        pull_requests = workflow_run.get("pull_requests")
+        if isinstance(pull_requests, list) and len(pull_requests) == 1:
+            pull_request = pull_requests[0]
+            if isinstance(pull_request, Mapping):
+                return _same_repository_pull_request_target(pull_request, repository)
+
+    if isinstance(payload_repository, Mapping):
+        default_branch = payload_repository.get("default_branch")
+        if isinstance(default_branch, str) and default_branch.strip():
+            return default_branch.strip(), head_sha
+    ref_name = environment.get("GITHUB_REF_NAME")
+    return (ref_name, head_sha) if ref_name else None
+
+
+def _same_repository_pull_request_target(
+    pull_request: Mapping[str, object], repository: str
+) -> tuple[str, str] | None:
+    head = pull_request.get("head")
+    if not isinstance(head, Mapping):
+        return None
+    head_repository = head.get("repo")
+    branch = head.get("ref")
+    source_sha = head.get("sha")
+    if (
+        not isinstance(head_repository, Mapping)
+        or head_repository.get("full_name") != repository
+        or not isinstance(branch, str)
+        or not branch.strip()
+        or not isinstance(source_sha, str)
+    ):
+        return None
+    return branch.strip(), source_sha
 
 
 def _real_bisect_result(

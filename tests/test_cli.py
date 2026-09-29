@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from etio.auto_pr import AutoPRResult
 from etio.cli import (
     _event_pull_request_number,
     _report_target,
@@ -51,6 +52,8 @@ def test_run_action_collects_an_unreported_diagnosis(
         "report-url=\n"
         "diagnosis=The setup is broken.\n"
         "bisection-status=disabled\n"
+        "auto-pr-url=\n"
+        "auto-pr-status=disabled\n"
     )
 
 
@@ -155,6 +158,8 @@ def test_run_action_reports_to_the_pull_request_in_a_matching_event(
         "report-url=https://github.test/octo/etio/pull/7#issuecomment-1\n"
         "diagnosis=The setup is broken.\n"
         "bisection-status=disabled\n"
+        "auto-pr-url=\n"
+        "auto-pr-status=disabled\n"
     )
 
 
@@ -211,7 +216,97 @@ def test_run_action_reports_a_confirmed_real_bisection(
         "report-url=https://github.test/octo/etio/pull/7#issuecomment-1\n"
         "diagnosis=The setup is broken.\n"
         "bisection-status=confirmed\n"
+        "auto-pr-url=\n"
+        "auto-pr-status=disabled\n"
     )
+
+
+def test_run_action_opens_a_draft_pr_only_when_enabled_and_confident(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    output_path = tmp_path / "github-output"
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        '{"repository":{"full_name":"octo/etio"},'
+        '"pull_request":{"number":7,"base":{"ref":"main"},'
+        '"head":{"ref":"feature","sha":"' + "c" * 40 + '",'
+        '"repo":{"full_name":"octo/etio"}}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("INPUT_GITHUB_TOKEN", "token")
+    monkeypatch.setenv("INPUT_GROQ_API_KEY", "key")
+    monkeypatch.setenv("INPUT_MAX_DIFF_LINES", "400")
+    monkeypatch.setenv("INPUT_AUTO_PR", "true")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "octo/etio")
+    monkeypatch.setenv("GITHUB_RUN_ID", "42")
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    monkeypatch.setenv("GITHUB_SHA", "a" * 40)
+    monkeypatch.setenv("GITHUB_REF_NAME", "main")
+    monkeypatch.setattr(
+        "etio.cli.list_attempt_jobs",
+        lambda *_: [WorkflowJob(17, "test", "completed", "failure")],
+    )
+    monkeypatch.setattr("etio.cli.fetch_job_logs", lambda *_: "error: broken")
+    monkeypatch.setattr("etio.cli.find_last_passing_commit", lambda *_: "b" * 40)
+    monkeypatch.setattr("etio.cli.build_failure_diff", lambda *_: "diff")
+    monkeypatch.setattr(
+        "etio.cli.diagnose_failure",
+        lambda *_: Diagnosis(
+            "Fix initialization.", "A value is unset.", "+ value=1", "high"
+        ),
+    )
+    captured: dict[str, object] = {}
+
+    def create_auto_pr(*args: object, **kwargs: object) -> AutoPRResult:
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return AutoPRResult(
+            "https://github.test/octo/etio/pull/8",
+            "etio/auto-fix/42-1-aaaaaaaaaaaa",
+            True,
+        )
+
+    monkeypatch.setattr("etio.cli.open_auto_pr", create_auto_pr)
+    monkeypatch.setattr(
+        "etio.cli.post_diagnosis",
+        lambda *_, **__: "https://github.test/octo/etio/pull/7#issuecomment-1",
+    )
+
+    assert run_action() == 0
+    assert captured["args"][1] == "feature"
+    assert captured["args"][2] == "c" * 40
+    assert output_path.read_text(encoding="utf-8") == (
+        "status=diagnosed\n"
+        "breaking-commit=\n"
+        "report-url=https://github.test/octo/etio/pull/7#issuecomment-1\n"
+        "diagnosis=Fix initialization.\n"
+        "bisection-status=disabled\n"
+        "auto-pr-url=https://github.test/octo/etio/pull/8\n"
+        "auto-pr-status=created\n"
+    )
+
+
+def test_auto_pr_base_branch_uses_the_pull_request_base_ref(
+    tmp_path: Path,
+) -> None:
+    from etio.cli import _auto_pr_target
+
+    event_path = tmp_path / "event.json"
+    event_path.write_text(
+        '{"repository":{"full_name":"octo/etio"},'
+        '"pull_request":{"base":{"ref":"main"},'
+        '"head":{"ref":"release/1.x","sha":"' + "d" * 40 + '",'
+        '"repo":{"full_name":"octo/etio"}}}}',
+        encoding="utf-8",
+    )
+
+    assert _auto_pr_target(
+        {"GITHUB_EVENT_PATH": str(event_path), "GITHUB_REF_NAME": "main"},
+        "octo/etio",
+        "e" * 40,
+    ) == ("release/1.x", "d" * 40)
 
 
 def test_report_target_rejects_mismatched_event_repository(tmp_path: Path) -> None:
@@ -245,5 +340,5 @@ def test_write_action_outputs_prevents_newline_injection(
 
     contents = output_path.read_text(encoding="utf-8")
     assert "forged=value" in contents
-    assert contents.count("\n") == 5
+    assert contents.count("\n") == 7
     assert "ghp_" not in contents

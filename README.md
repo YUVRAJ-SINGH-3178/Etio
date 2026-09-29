@@ -141,6 +141,30 @@ does not infer a commit report from a branch or workflow run. It updates only a
 comment created by the same GitHub token and carrying an immutable
 target-specific Etio marker.
 
+## Auto-PR
+
+Set `auto-pr: true` only when you want Etio to open a draft pull request for a
+high-confidence diagnosis that includes a patch. Etio checks that the patch is
+a text diff against existing repository files, rejects additions, deletions,
+renames, workflow edits, and paths outside the checkout, applies it on an
+`etio/auto-fix/` branch, and opens a draft PR. It never merges the PR.
+For a same-repository pull request, the draft targets that pull request's source
+branch and contains only the suggested patch. Etio cannot push to a fork's
+source branch, so auto-PR is not available for fork-based pull requests.
+
+The diagnostic job needs `contents: write` and `pull-requests: write` for this
+feature. The default `auto-pr: false` requires neither extra permission. When
+the supplied token is `GITHUB_TOKEN`, GitHub may hold PR-triggered workflow
+runs for approval; review the draft and approve its checks as appropriate.
+GitHub's [create pull request API](https://docs.github.com/en/rest/pulls/pulls)
+supports draft creation and requires pull-request write permission. GitHub's
+[GITHUB_TOKEN documentation](https://docs.github.com/en/actions/concepts/security/github_token)
+describes workflow runs created by automation tokens.
+
+`auto-pr-url` and `auto-pr-status` expose the draft URL and whether Etio
+created it, found an existing PR for the same run, skipped because no
+high-confidence patch was available, or failed.
+
 ## Development
 
 Etio requires Python 3.11 or later.
@@ -166,8 +190,7 @@ strings, and private-key blocks before logs or diffs leave the GitHub runner.
 Raw logs and diffs are kept in memory only and are not printed or exported as
 action outputs. The Groq request asks for a JSON Schema-constrained diagnosis,
 and Etio validates and redacts the response again before exposing it. Etio does
-not auto-merge pull requests. Its future auto-PR capability will be opt-in and
-require human review.
+not auto-merge pull requests. Auto-PR creates drafts for human review.
 
 ## License
 

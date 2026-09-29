@@ -46,7 +46,7 @@ inputs:
     required: false
     default: .github/etio.yml
   auto-pr:
-    description: Allow the later auto-PR phase. Human review is always required.
+    description: Open a draft pull request for a high-confidence suggested patch.
     required: false
     default: "false"
   report-mode:
@@ -80,6 +80,12 @@ outputs:
   bisection-status:
     description: disabled, confirmed, incomplete, or failed.
     value: ${{ steps.etio.outputs.bisection-status }}
+  auto-pr-url:
+    description: URL of an Etio-generated draft pull request.
+    value: ${{ steps.etio.outputs.auto-pr-url }}
+  auto-pr-status:
+    description: disabled, skipped, created, existing, or failed.
+    value: ${{ steps.etio.outputs.auto-pr-status }}
 
 runs:
   using: composite

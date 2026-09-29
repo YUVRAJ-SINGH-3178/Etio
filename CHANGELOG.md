@@ -9,6 +9,7 @@ All notable changes to Etio are documented here.
 - Opt-in workflow-dispatch real bisection with bounded candidate runs,
   first-parent confirmation, and exact-run polling.
 - Cleanup of Etio-owned temporary refs after each dispatched candidate.
+- Optional, draft-only auto-PR creation for validated high-confidence patches.
 
 ## [0.1.0] - 2026-07-27
 
