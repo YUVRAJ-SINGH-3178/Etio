@@ -1,5 +1,5 @@
 name: Etio
-description: Diagnose failed GitHub Actions jobs using repository context and Groq.
+description: AI-assisted diagnosis of failed GitHub Actions jobs using repository context and Groq.
 author: Yuvraj Singh
 branding:
   icon: activity

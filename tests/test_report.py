@@ -243,7 +243,10 @@ def test_build_diagnosis_comment_uses_a_safe_fence_and_neutralizes_mentions() ->
 
     assert "@maintainer" not in comment
     assert "@\u200bmaintainer" in comment
-    assert "secret" not in comment
+    assert "password=secret" not in comment
+    assert "AI-generated" in comment
+    assert "review it before acting" in comment
+    assert "Etio/issues" in comment
     assert chr(96) * 5 in comment
 
 
