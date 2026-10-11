@@ -1,4 +1,4 @@
-name: Etio
+name: Etio CI Failure Auto-Doctor
 description: AI-assisted diagnosis of failed GitHub Actions jobs using repository context and Groq.
 author: Yuvraj Singh
 branding:
