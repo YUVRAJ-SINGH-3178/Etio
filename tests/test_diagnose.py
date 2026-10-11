@@ -71,6 +71,7 @@ def test_diagnose_failure_redacts_evidence_and_uses_structured_output() -> None:
     assert "[REDACTED]" in prompt
     assert payload["store"] is False
     assert payload["response_format"]["type"] == "json_schema"
+    assert request.get_header("User-agent").startswith("Etio/0.1.0")
 
 
 def test_diagnose_failure_never_returns_a_low_confidence_patch() -> None:

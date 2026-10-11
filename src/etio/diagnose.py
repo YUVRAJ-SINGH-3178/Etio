@@ -73,6 +73,7 @@ def diagnose_failure(
         headers={
             "Authorization": f"Bearer {groq_api_key}",
             "Content-Type": "application/json",
+            "User-Agent": "Etio/0.1.0 (+https://github.com/YUVRAJ-SINGH-3178/Etio)",
         },
         method="POST",
     )
